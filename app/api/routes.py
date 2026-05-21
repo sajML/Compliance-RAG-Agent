@@ -1,5 +1,6 @@
 import filetype
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.security import APIKeyHeader
 
 from app.agent.graph import qa_graph
 from app.config import settings
@@ -12,7 +13,17 @@ from app.schemas.responses import (
 from app.services.ingest import get_collection, ingest_pdf, ingest_text
 from app.services.retriever import invalidate_bm25_cache
 
-router = APIRouter()
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(key: str = Depends(_api_key_header)):
+    if not settings.api_key:
+        return
+    if key != settings.api_key:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 
 @router.post("/ingest", response_model=IngestResponse)
