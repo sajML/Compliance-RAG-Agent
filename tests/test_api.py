@@ -85,3 +85,41 @@ class TestCollectionStats:
         data = response.json()
         assert data["total_chunks"] == 0
         assert data["sources"] == []
+
+
+class TestHealthEndpoint:
+    def test_health_returns_ok(self):
+        response = client.get("/health")
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}
+
+
+class TestApiKeyAuth:
+    @patch("app.api.routes.settings")
+    def test_rejects_missing_key_when_configured(self, mock_settings):
+        mock_settings.api_key = "secret-key"
+        mock_settings.max_file_size_mb = 50
+        response = client.get("/collection/stats")
+        assert response.status_code == 401
+
+    @patch("app.api.routes.settings")
+    @patch("app.api.routes.get_collection")
+    def test_accepts_valid_key(self, mock_get, mock_settings):
+        mock_settings.api_key = "secret-key"
+        mock_col = MagicMock()
+        mock_col.count.return_value = 0
+        mock_get.return_value = mock_col
+        response = client.get(
+            "/collection/stats",
+            headers={"X-API-Key": "secret-key"},
+        )
+        assert response.status_code == 200
+
+    @patch("app.api.routes.settings")
+    def test_rejects_wrong_key(self, mock_settings):
+        mock_settings.api_key = "secret-key"
+        response = client.get(
+            "/collection/stats",
+            headers={"X-API-Key": "wrong-key"},
+        )
+        assert response.status_code == 401
