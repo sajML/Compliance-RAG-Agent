@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o"
     embedding_model: str = "text-embedding-3-small"
 
+    chroma_host: Optional[str] = None
+    chroma_port: int = 8000
+    chroma_ssl: bool = False
+    chroma_token: Optional[str] = None
     chroma_persist_dir: str = "./chroma_data"
     collection_name: str = "compliance_docs"
 
@@ -19,6 +23,8 @@ class Settings(BaseSettings):
     final_top_k: int = 5
 
     max_file_size_mb: int = 50
+
+    api_key: Optional[str] = None
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

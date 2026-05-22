@@ -10,6 +10,15 @@ from app.services.text_extractor import extract_text_from_pdf
 
 
 def get_chroma_client() -> chromadb.ClientAPI:
+    if settings.chroma_host:
+        kwargs = {
+            "host": settings.chroma_host,
+            "port": settings.chroma_port,
+            "ssl": settings.chroma_ssl,
+        }
+        if settings.chroma_token:
+            kwargs["headers"] = {"Authorization": f"Bearer {settings.chroma_token}"}
+        return chromadb.HttpClient(**kwargs)
     return chromadb.PersistentClient(path=settings.chroma_persist_dir)
 
 
