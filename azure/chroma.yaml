@@ -1,0 +1,34 @@
+location: West Europe
+name: chroma
+type: Microsoft.App/containerApps
+properties:
+  managedEnvironmentId: /subscriptions/61e9e485-f0e5-4b6d-b1e3-c9af957e5148/resourceGroups/rg-compliance-rag/providers/Microsoft.App/managedEnvironments/cae-compliance-rag
+  configuration:
+    activeRevisionsMode: Single
+    ingress:
+      external: false          # internal-only: reachable from the app, never the internet
+      targetPort: 8000         # ChromaDB listens on 8000
+      transport: http
+      allowInsecure: true      # plaintext is fine on the private environment network
+  template:
+    containers:
+      - image: chromadb/chroma:1.5.9
+        name: chroma
+        command:
+          - /bin/sh
+          - -c
+          - |
+            printf 'listen_address: "0.0.0.0"\nport: 8000\npersist_path: "/tmp/chromadb"\n' > /tmp/chroma-config.yaml && exec chroma run /tmp/chroma-config.yaml
+        resources:
+          cpu: 0.5
+          memory: 1.0Gi
+        volumeMounts:
+          - volumeName: chroma-vol
+            mountPath: /data    # ChromaDB 1.5.9 persists here (verified from the image)
+    scale:
+      minReplicas: 1            # single replica = single SQLite writer (required for consistency)
+      maxReplicas: 1
+    volumes:
+      - name: chroma-vol
+        storageType: AzureFile
+        storageName: chromastore   # the env storage we registered in Step 6

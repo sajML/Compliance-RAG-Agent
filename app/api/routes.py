@@ -1,5 +1,7 @@
+import secrets
+
 import filetype
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.security import APIKeyHeader
 
 from app.agent.graph import qa_graph
@@ -16,14 +18,26 @@ from app.services.retriever import invalidate_bm25_cache
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
-async def verify_api_key(key: str = Depends(_api_key_header)):
-    if not settings.api_key:
+def _auth_configured() -> bool:
+    """True if any auth mechanism is set (UI login or API key)."""
+    return bool(settings.api_key or settings.app_password)
+
+
+async def verify_access(request: Request, key: str = Depends(_api_key_header)):
+    """Allow a request if it carries a valid UI session OR a valid API key.
+
+    Falls open only when no auth is configured at all (local dev).
+    """
+    if request.session.get("authed"):
         return
-    if key != settings.api_key:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    if settings.api_key and key and secrets.compare_digest(key, settings.api_key):
+        return
+    if not _auth_configured():
+        return
+    raise HTTPException(status_code=401, detail="Authentication required")
 
 
-router = APIRouter(dependencies=[Depends(verify_api_key)])
+router = APIRouter(dependencies=[Depends(verify_access)])
 
 
 @router.post("/ingest", response_model=IngestResponse)
