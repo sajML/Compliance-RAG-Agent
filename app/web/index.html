@@ -68,6 +68,9 @@
   .chip{font-size:12.5px;color:var(--muted);background:rgba(255,255,255,.05);border:1px solid var(--card-border);border-radius:999px;padding:7px 12px;cursor:pointer;transition:.15s}
   .chip:hover{color:var(--txt);border-color:var(--accent);background:rgba(99,102,241,.12)}
   .row{display:flex;gap:10px;margin-top:14px}
+  .kb{margin-top:14px;padding-top:13px;border-top:1px solid var(--card-border);font-size:12.5px;color:var(--muted);line-height:2}
+  .kb b{color:var(--txt)}
+  .kb .doc{display:inline-block;background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.32);color:var(--accent2);border-radius:6px;padding:2px 9px;margin:0 3px;font-size:11.5px}
 
   /* ANSWER */
   #answerCard{margin-top:18px}
@@ -120,10 +123,14 @@
   /* generate typing */
   .gpt{font-size:10px;font-weight:700;color:#fff;background:linear-gradient(135deg,#10a37f,#0e8c6d);border-radius:6px;padding:2px 8px;margin-right:8px}
   .typing{display:inline-flex;gap:4px;vertical-align:middle}
-  .typing i{width:6px;height:6px;border-radius:50%;background:var(--accent2);animation:tdot 1s infinite}
-  .typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}
+  .typing i{width:6px;height:6px;border-radius:50%;background:var(--accent2);opacity:.3}
+  .pstep.active .typing i{animation:tdot 1s infinite}
+  .pstep.active .typing i:nth-child(2){animation-delay:.15s}.pstep.active .typing i:nth-child(3){animation-delay:.3s}
+  .pstep.done .typing{display:none}
   @keyframes tdot{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-4px)}}
-  .gline{height:8px;border-radius:5px;margin-top:8px;background:linear-gradient(90deg,rgba(34,211,238,.1),rgba(34,211,238,.35),rgba(34,211,238,.1));background-size:200% 100%;animation:sh 1.2s infinite}
+  .gline{height:8px;border-radius:5px;margin-top:8px;background:linear-gradient(90deg,rgba(34,211,238,.12),rgba(34,211,238,.28),rgba(34,211,238,.12));background-size:200% 100%}
+  .pstep.active .gline{animation:sh 1.2s infinite}
+  .pstep.done .gline{background:rgba(34,211,238,.22)}
   .gline.s{width:60%}
   /* format chips */
   .cchips{display:flex;flex-wrap:wrap;gap:6px}
@@ -188,6 +195,7 @@
         <textarea id="q" rows="3" placeholder="e.g. What is the right to erasure under the GDPR?"></textarea>
         <div class="row"><button class="btn" id="askBtn" style="flex:1">Ask &nbsp;→</button></div>
         <div class="chips" id="examples"></div>
+        <div class="kb" id="kb"></div>
       </div>
       <div class="card pad hidden" id="answerCard">
         <div class="label">Answer</div>
@@ -369,6 +377,10 @@ function finishErr(m){ $('#answer').innerHTML=`<span style="color:var(--bad)">${
 async function loadStats(){
   try{ const r=await api('/collection/stats'); if(!r.ok)throw 0; const d=await r.json();
     $('#statsTxt').textContent=d.total_chunks>0?`${d.total_chunks} chunks · ${d.sources.length} document(s)`:'no documents yet — upload one';
+    const kb=$('#kb');
+    if(d.total_chunks>0 && d.sources.length){
+      kb.innerHTML='<b>📚 Pre-loaded knowledge base</b> — ask about: '+d.sources.map(s=>`<span class="doc">${esc(s)}</span>`).join('')+' &nbsp;·&nbsp; or add your own below.';
+    } else { kb.innerHTML='<b>📭 No documents loaded yet</b> — upload one under “Add a document” to get started.'; }
   }catch(e){ $('#statsTxt').textContent='stats unavailable'; }
 }
 async function upload(){
