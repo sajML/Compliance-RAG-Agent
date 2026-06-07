@@ -118,3 +118,15 @@ async def collection_stats():
         sources = sorted({m["source"] for m in all_meta["metadatas"]})
 
     return CollectionStatsResponse(total_chunks=count, sources=sources)
+
+
+@router.delete("/documents")
+async def delete_document(source: str):
+    collection = get_collection()
+    existing = collection.get(where={"source": source}, include=[])
+    ids = existing.get("ids", [])
+    if not ids:
+        raise HTTPException(status_code=404, detail=f"No document named '{source}'")
+    collection.delete(where={"source": source})
+    invalidate_bm25_cache()
+    return {"deleted": source, "chunks_removed": len(ids)}
