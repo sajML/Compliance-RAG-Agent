@@ -3,6 +3,10 @@ name: Build and push image to ACR
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
   workflow_dispatch:
 
 jobs:

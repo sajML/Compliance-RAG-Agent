@@ -1,260 +1,266 @@
-# Compliance RAG Agent
+<div align="center">
 
-A production-style backend service that answers natural-language questions about compliance and regulatory documents using Retrieval-Augmented Generation. Upload PDFs or text files, and the system chunks, embeds, and indexes them into a vector store, then retrieves the most relevant passages at query time using **hybrid search** (vector similarity + BM25 keyword matching) merged via **Reciprocal Rank Fusion**, and generates grounded answers with **source citations**.
+# 🛡️ Compliance RAG Agent
 
-Built with a LangGraph agentic pipeline -- each stage is an independent node with conditional error-abort edges, making the system testable, resilient, and extensible. Dockerized and deployable to **Google Cloud Run** with CI/CD via Cloud Build.
+**Ask natural-language questions over regulatory documents and get grounded, cited answers.**
 
-## Architecture
+Hybrid retrieval (vector + BM25 → Reciprocal Rank Fusion) · LangGraph agentic pipeline · FastAPI · a real web UI that visualizes the pipeline as it runs · deployed on Azure Container Apps with CI/CD.
+
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-agentic-1C3C3C)](https://langchain-ai.github.io/langgraph/)
+[![OpenAI](https://img.shields.io/badge/OpenAI-gpt--4o--mini-412991?logo=openai&logoColor=white)](https://platform.openai.com/)
+[![ChromaDB](https://img.shields.io/badge/ChromaDB-vector%20store-FF6F61)](https://www.trychroma.com/)
+[![Azure](https://img.shields.io/badge/Azure-Container%20Apps-0078D4?logo=microsoftazure&logoColor=white)](https://azure.microsoft.com/products/container-apps)
+[![CI](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)](.github/workflows/build-push.yml)
+[![Tests](https://img.shields.io/badge/tests-25%20passing-success)](tests/)
+
+### 🔗 [**Live Demo**](https://compliance-rag-agent.whitewave-2299ab7c.westeurope.azurecontainerapps.io) &nbsp;·&nbsp; login `demo123` / `demo789`
+
+</div>
+
+<p align="center">
+  <img src="docs/demo.png" alt="Compliance RAG Agent — web UI with live pipeline visualization" width="100%">
+</p>
+
+---
+
+## Why this project is interesting
+
+This isn't a notebook or a thin wrapper around an LLM. It's a small but **production-shaped system**:
+
+- **Hybrid retrieval done properly** — semantic (vector) *and* lexical (BM25) search, fused with **Reciprocal Rank Fusion** for better recall than either alone.
+- **Agentic pipeline** — a **LangGraph** state machine (`validate → retrieve → generate → format`) where every stage can conditionally abort, so failures are explicit and the flow is testable.
+- **Grounded & cited** — answers cite the exact **source file and page**; the model is instructed to answer *only* from retrieved context.
+- **A real product, not just an API** — a polished web UI that **visualizes the pipeline and the Azure request flow as your query runs**, with login, document management, and live stats.
+- **Actually deployed** — runs on **Azure Container Apps** (Chroma kept **internal-only** on the private network), built and pushed by **GitHub Actions** CI/CD, with secrets in Container Apps secrets. Also ships a **Google Cloud Run** config.
+- **Tested** — 25 unit/integration tests that run with no API keys or network.
+
+---
+
+## 🔴 Live demo
+
+**[compliance-rag-agent.whitewave-2299ab7c.westeurope.azurecontainerapps.io](https://compliance-rag-agent.whitewave-2299ab7c.westeurope.azurecontainerapps.io)** — login with **`demo123`** / **`demo789`**.
+
+The **GDPR (Regulation (EU) 2016/679)** is pre-loaded, so you can ask right away:
+
+> *"What is the right to erasure?"* · *"When must a Data Protection Officer be appointed?"* · *"What are the penalties for non-compliance?"*
+
+Hit **Ask** and watch the pipeline light up stage by stage, then read the answer with clickable citations. You can also upload your own PDFs/text and remove documents from the knowledge base.
+
+---
+
+## 🏗️ How it works
 
 ```
-                          ┌──────────────────────────────────────────────┐
-                          │              Ingest Pipeline                 │
-  PDF / Text  ───────────►│  Extract Text ─► Chunk ─► Embed ─► ChromaDB │
-                          └──────────────────────────────────────────────┘
+  ┌─────────────────────────── INGEST ───────────────────────────┐
+  │  PDF / Text ─► extract (PyMuPDF) ─► chunk ─► embed ─► ChromaDB │
+  └───────────────────────────────────────────────────────────────┘
 
-                          ┌──────────────────────────────────────────────┐
-                          │         Query Pipeline (LangGraph)           │
-  Question    ───────────►│  Validate ─► Retrieve ─► Generate ─► Format │
-                          │               (hybrid)    (GPT-4o)   (cite) │
-                          └──────────────────────────────────────────────┘
-                                          │
-                                   ┌──────┴──────┐
-                                   │  Hybrid     │
-                                   │  Retrieval  │
-                                   ├─────────────┤
-                                   │ Vector      │  ChromaDB cosine
-                                   │ BM25        │  rank-bm25
-                                   │ Merge (RRF) │  Reciprocal Rank Fusion
-                                   └─────────────┘
+  ┌──────────────────── QUERY (LangGraph agent) ──────────────────┐
+  │   Validate ──► Retrieve ──► Generate ──► Format                │
+  │   (guardrail) (hybrid)    (gpt-4o-mini) (citations)           │
+  │       └── conditional error-abort edge at every stage ──┘     │
+  └───────────────────────────────────────────────────────────────┘
+                              │
+                  ┌───────────┴───────────┐
+                  │     Hybrid Retrieval   │
+                  │  Vector  → ChromaDB (cosine)
+                  │  BM25    → rank-bm25 (keyword)
+                  │  Fusion  → Reciprocal Rank Fusion → top-k
+                  └────────────────────────┘
 ```
 
-### Cloud Deployment
+**A query, end to end:** the question is validated → embedded and run through vector search **and** BM25 in parallel → the two ranked lists are merged with RRF → the top chunks become grounding context for `gpt-4o-mini` → the answer is parsed for `[n]` markers and matched back to source/page citations.
+
+---
+
+## ☁️ Azure deployment architecture
 
 ```
-┌─────────────┐     ┌──────────────────────────┐     ┌──────────────────────┐
-│  Cloud Build │────►│  Artifact Registry       │────►│  Cloud Run (app)     │
-│  (CI/CD)    │     │  (Docker image)          │     │  FastAPI + LangGraph │
-└─────────────┘     └──────────────────────────┘     └──────────┬───────────┘
-                                                                │
-                    ┌──────────────────────────┐                │
-                    │  Secret Manager          │────────────────┤
-                    │  OPENAI_API_KEY          │                │
-                    │  API_KEY, CHROMA_TOKEN   │                │
-                    └──────────────────────────┘                │
-                                                                │
-                    ┌──────────────────────────┐                │
-                    │  Cloud Run (chromadb)    │◄───────────────┘
-                    │  Persistent vector store │
-                    └──────────────────────────┘
+        GitHub ──push──► GitHub Actions ──build & push──► Azure Container Registry
+                                                                   │ image
+                                                                   ▼
+   Internet ──HTTPS──►  ┌──────────────────────────────┐   pulls from ACR
+                        │  Container App:  app  (public) │
+                        │  FastAPI + Web UI + LangGraph  │
+                        │  secrets: OpenAI key, login,   │
+                        │           session secret       │
+                        └───────────────┬────────────────┘
+                                        │  private env network (internal-only)
+                                        ▼
+                        ┌──────────────────────────────┐
+                        │  Container App:  chroma        │
+                        │  ChromaDB · vector store       │
+                        │  NOT exposed to the internet   │
+                        └──────────────────────────────┘
+              both run inside one Container Apps Environment (West Europe)
 ```
 
-## Features
+**Design note:** Chroma uses **internal ingress** — it's reachable only by the app inside the environment, never from the public internet (an improvement over exposing it publicly with a token). The app's public ingress is login-gated.
 
-- **Hybrid search** -- combines semantic (vector) and lexical (BM25) retrieval, merged with Reciprocal Rank Fusion for better recall than either method alone
-- **Source citations** -- every answer references the exact document and page it drew from (e.g., `[1] gdpr.pdf, Page 3`)
-- **Agentic pipeline** -- LangGraph StateGraph with 4 nodes and conditional error-abort at every stage
-- **PDF + text ingestion** -- extracts text from PDFs via PyMuPDF, chunks with LangChain's RecursiveCharacterTextSplitter
-- **Persistent vector store** -- ChromaDB with cosine similarity; local PersistentClient or remote HTTP client
-- **Production-grade API** -- FastAPI with magic-byte MIME detection, file-size limits, Pydantic v2 response models, API key authentication, global exception handling
-- **Cloud-native deployment** -- Dockerized, Cloud Run serverless, Cloud Build CI/CD, Secret Manager integration
+---
 
-## Endpoints
+## ✨ Features
+
+| | |
+|---|---|
+| 🔎 **Hybrid search** | Vector + BM25 merged with Reciprocal Rank Fusion |
+| 📄 **Cited answers** | Every answer references the exact document + page |
+| 🧠 **Agentic pipeline** | LangGraph StateGraph, 4 nodes, conditional abort edges |
+| 🎨 **Live UI** | Animated pipeline + Azure request-flow visualization |
+| 🔐 **Auth** | Username/password (signed-cookie sessions) **or** `X-API-Key` for programmatic use |
+| 📚 **Doc management** | Upload PDF/text and remove documents from the UI |
+| 📦 **Ingestion** | PyMuPDF extraction, LangChain recursive chunking, magic-byte MIME detection, size limits |
+| ⚙️ **Production API** | FastAPI, Pydantic v2 models, global exception handling, `/health` |
+| ☁️ **Cloud-native** | Azure Container Apps + ACR + GitHub Actions CI/CD (and a Cloud Run config) |
+| ✅ **Tested** | 25 tests, no external services required |
+
+---
+
+## 🎨 The "watch it think" UI
+
+The single-page UI (vanilla JS, served by FastAPI — no build step) renders the pipeline as it runs:
+
+- **Validate → Retrieve → Generate → Format** stages activate in sequence with a progress rail.
+- The **Retrieve** stage shows vector + BM25 score bars merging via RRF, with a counter scanning the corpus.
+- The **Generate** stage shows the model badge and a streaming effect; **Format** pops in citation chips.
+- A separate panel animates the **Azure request flow** (Browser → Container App → ChromaDB + OpenAI).
+
+---
+
+## 📡 API
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `POST` | `/ingest` | API key | Upload a PDF or text file to chunk, embed, and index |
-| `POST` | `/query` | API key | Ask a question; returns answer + citations |
-| `GET` | `/collection/stats` | API key | View total chunks and ingested source filenames |
-| `GET` | `/health` | None | Health check for Cloud Run |
-| `GET` | `/docs` | None | Interactive OpenAPI documentation (auto-generated) |
+| `GET` | `/` | — | Web UI (login + ask + manage docs) |
+| `POST` | `/login` · `/logout` | — | Session login / logout |
+| `GET` | `/me` | — | Auth status + active model |
+| `POST` | `/query` | session or API key | Ask a question → answer + citations |
+| `POST` | `/ingest` | session or API key | Upload a PDF/text file to index |
+| `DELETE` | `/documents?source=<name>` | session or API key | Remove a document and its chunks |
+| `GET` | `/collection/stats` | session or API key | Total chunks + ingested sources |
+| `GET` | `/health` | — | Health check |
+| `GET` | `/docs` | — | Auto-generated OpenAPI docs |
 
-## Quick Start
+---
 
-### Option 1: Local (without Docker)
+## 🧰 Tech stack
+
+**Core:** Python 3.12 · FastAPI · LangGraph · LangChain (text splitters) · OpenAI (`gpt-4o-mini` + `text-embedding-3-small`) · ChromaDB · rank-bm25 · PyMuPDF · Pydantic v2
+**Web:** vanilla HTML/CSS/JS UI · Starlette `SessionMiddleware` (signed cookies)
+**Infra:** Docker · Azure Container Apps · Azure Container Registry · GitHub Actions · Azure Files · (Google Cloud Run / Cloud Build config included)
+**Testing:** pytest
+
+---
+
+## 🚀 Run locally
+
+### Option A — Python (embedded Chroma)
 
 ```bash
-cd compliance-rag-agent
-
-python -m venv .venv
-.venv\Scripts\activate        # Windows
-# source .venv/bin/activate   # Linux/macOS
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-cp .env.example .env
-# Edit .env and add your OPENAI_API_KEY
-
+cp .env.example .env          # add your OPENAI_API_KEY
 uvicorn app.main:app --reload
 ```
 
-### Option 2: Docker Compose (app + ChromaDB)
+Open http://localhost:8080. To enable the login screen locally, set `APP_USERNAME`, `APP_PASSWORD`, and `COOKIE_SECURE=false` (so the session cookie works over http).
+
+### Option B — Docker Compose (app + ChromaDB server)
 
 ```bash
-cp .env.example .env
-# Edit .env and add your OPENAI_API_KEY
-
+cp .env.example .env          # add your OPENAI_API_KEY
 docker compose up --build
 ```
 
-This starts both the app (port 8080) and a ChromaDB server (port 8000). The app auto-connects to ChromaDB via the `CHROMA_HOST` env var.
+---
 
-## Usage
+## ☁️ Deploy to Azure (Container Apps)
 
-**1. Ingest a document:**
-```bash
-curl -X POST http://localhost:8080/ingest \
-  -H "X-API-Key: your-key" \
-  -F "file=@gdpr_regulation.pdf"
-```
-```json
-{
-  "filename": "gdpr_regulation.pdf",
-  "chunks_added": 247,
-  "message": "Ingested 247 chunks from gdpr_regulation.pdf"
-}
-```
+> CI/CD is already wired: pushing to `main` triggers **GitHub Actions** ([`.github/workflows/build-push.yml`](.github/workflows/build-push.yml)) which builds the `linux/amd64` image and pushes it to ACR. The Chroma service spec lives in [`azure/chroma.yaml`](azure/chroma.yaml).
 
-**2. Ask a question:**
-```bash
-curl -X POST http://localhost:8080/query \
-  -H "X-API-Key: your-key" \
-  -F "question=What are the data subject rights under GDPR?"
-```
-```json
-{
-  "answer": "Under GDPR, data subjects have several key rights including the right to access [1], the right to rectification [2], and the right to erasure ('right to be forgotten') [3]...",
-  "citations": [
-    {"source": "gdpr_regulation.pdf", "page": 12, "text": "The data subject shall have the right to obtain from the controller..."},
-    {"source": "gdpr_regulation.pdf", "page": 14, "text": "The data subject shall have the right to obtain the rectification..."},
-    {"source": "gdpr_regulation.pdf", "page": 15, "text": "The data subject shall have the right to obtain the erasure..."}
-  ],
-  "model": "gpt-4o",
-  "chunks_used": 5
-}
-```
-
-**3. Check collection stats:**
-```bash
-curl http://localhost:8080/collection/stats \
-  -H "X-API-Key: your-key"
-```
-
-## Cloud Deployment (Google Cloud Run)
-
-### Prerequisites
-
-- GCP project with billing enabled
-- `gcloud` CLI authenticated
-- APIs enabled: Cloud Run, Cloud Build, Artifact Registry, Secret Manager
-
-### 1. Create secrets in Secret Manager
+High-level steps (full commands in the deployment notes):
 
 ```bash
-echo -n "sk-your-openai-key" | gcloud secrets create openai-api-key --data-file=-
-echo -n "your-app-api-key"   | gcloud secrets create app-api-key --data-file=-
-echo -n "your-chroma-token"  | gcloud secrets create chroma-token --data-file=-
+# 1. resource group + registry + Container Apps environment
+az group create -n rg-compliance-rag -l westeurope
+az acr create -g rg-compliance-rag -n <acr> --sku Basic
+az containerapp env create -n cae-compliance-rag -g rg-compliance-rag -l westeurope
+
+# 2. deploy Chroma (internal ingress, port 8000) from azure/chroma.yaml
+az containerapp create -n chroma -g rg-compliance-rag --yaml azure/chroma.yaml
+
+# 3. deploy the app (public ingress) with secrets + the internal Chroma host
+az containerapp create -n compliance-rag-agent -g rg-compliance-rag \
+  --environment cae-compliance-rag \
+  --image <acr>.azurecr.io/compliance-rag-agent:latest \
+  --target-port 8080 --ingress external \
+  --secrets openai-api-key=<key> app-password=<pw> session-secret=<rand> \
+  --env-vars OPENAI_API_KEY=secretref:openai-api-key APP_USERNAME=<user> \
+             APP_PASSWORD=secretref:app-password SESSION_SECRET=secretref:session-secret \
+             CHROMA_HOST=chroma.internal.<env-domain> CHROMA_PORT=443 CHROMA_SSL=true
 ```
 
-### 2. Create Artifact Registry repository
+A **Google Cloud Run** deployment (Cloud Build + Artifact Registry + Secret Manager) is also supported via [`cloudbuild.yaml`](cloudbuild.yaml).
 
-```bash
-gcloud artifacts repositories create compliance-rag \
-  --repository-format=docker \
-  --location=europe-west1
-```
+---
 
-### 3. Deploy ChromaDB as a Cloud Run service (one-time)
-
-```bash
-gcloud run deploy chromadb \
-  --image=chromadb/chroma:latest \
-  --region=europe-west1 \
-  --platform=managed \
-  --no-allow-unauthenticated \
-  --port=8000 \
-  --memory=512Mi \
-  --set-env-vars="ANONYMIZED_TELEMETRY=false,CHROMA_SERVER_AUTHN_PROVIDER=chromadb.auth.token_authn.TokenAuthenticationServerProvider" \
-  --set-secrets="CHROMA_SERVER_AUTHN_CREDENTIALS=chroma-token:latest"
-```
-
-Note the service URL (e.g., `chromadb-xxxxx-ew.a.run.app`).
-
-### 4. Deploy the app via Cloud Build
-
-Update `_CHROMA_HOST` in `cloudbuild.yaml` with the ChromaDB service host, then:
-
-```bash
-gcloud builds submit --config=cloudbuild.yaml
-```
-
-Or set up a Cloud Build trigger for automatic deployment on git push.
-
-### 5. Grant service-to-service auth
-
-```bash
-# Allow the app's service account to invoke the ChromaDB service
-gcloud run services add-iam-policy-binding chromadb \
-  --region=europe-west1 \
-  --member="serviceAccount:YOUR_PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
-  --role="roles/run.invoker"
-```
-
-## Project Structure
-
-```
-compliance-rag-agent/
-├── app/
-│   ├── main.py                 # FastAPI app factory + /health endpoint
-│   ├── config.py               # pydantic-settings (OpenAI, ChromaDB, auth)
-│   ├── agent/
-│   │   ├── state.py            # TypedDict state schema
-│   │   ├── nodes.py            # Pipeline nodes: validate, retrieve, generate, format
-│   │   └── graph.py            # LangGraph StateGraph with conditional edges
-│   ├── api/
-│   │   └── routes.py           # FastAPI endpoints + API key auth
-│   ├── services/
-│   │   ├── ingest.py           # Chunking, embedding, ChromaDB (local or HTTP)
-│   │   ├── retriever.py        # Hybrid search (vector + BM25 + RRF)
-│   │   └── text_extractor.py   # PDF text extraction via PyMuPDF
-│   └── schemas/
-│       └── responses.py        # Pydantic v2 response models
-├── tests/                      # 25 tests (unit + integration)
-├── Dockerfile                  # Python 3.12-slim, Cloud Run PORT convention
-├── docker-compose.yml          # Local dev: app + ChromaDB
-├── cloudbuild.yaml             # CI/CD: build, push, deploy to Cloud Run
-├── requirements.txt
-├── requirements-dev.txt
-├── .env.example
-├── .dockerignore
-└── .gitignore
-```
-
-## Configuration
+## ⚙️ Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OPENAI_API_KEY` | -- | Required. OpenAI API key |
-| `OPENAI_MODEL` | `gpt-4o` | LLM for answer generation |
-| `EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model for vector search |
-| `CHROMA_HOST` | -- | ChromaDB server host (omit for local PersistentClient) |
-| `CHROMA_PORT` | `8000` | ChromaDB server port |
-| `CHROMA_SSL` | `false` | Use HTTPS for ChromaDB connection |
-| `CHROMA_TOKEN` | -- | Bearer token for ChromaDB authentication |
-| `API_KEY` | -- | API key for X-API-Key header auth (omit to disable) |
-| `CHUNK_SIZE` | `512` | Characters per chunk |
-| `CHUNK_OVERLAP` | `64` | Overlap between chunks |
-| `RETRIEVAL_TOP_K` | `10` | Candidates retrieved per search method |
-| `FINAL_TOP_K` | `5` | Chunks sent to LLM after RRF merge |
+| `OPENAI_API_KEY` | — | **Required.** OpenAI API key |
+| `OPENAI_MODEL` | `gpt-4o-mini` | LLM for answer generation |
+| `EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model |
+| `APP_USERNAME` / `APP_PASSWORD` | — | Web UI login credentials |
+| `SESSION_SECRET` | — | Key for signing session cookies (set in prod) |
+| `COOKIE_SECURE` | `true` | `false` for local http preview |
+| `API_KEY` | — | `X-API-Key` for programmatic access |
+| `CHROMA_HOST` | — | Chroma server host (omit for embedded mode) |
+| `CHROMA_PORT` / `CHROMA_SSL` | `8000` / `false` | Chroma connection |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `512` / `64` | Chunking |
+| `RETRIEVAL_TOP_K` / `FINAL_TOP_K` | `10` / `5` | Candidates per method / chunks to LLM |
 | `MAX_FILE_SIZE_MB` | `50` | Upload size limit |
 
-## Testing
+---
+
+## 🧪 Testing
 
 ```bash
 pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
 
-25 tests covering node logic, API endpoints, API key auth, health check, and retriever utilities -- all run without API keys or external services.
+**25 tests** covering pipeline nodes, API endpoints, auth, health, and retriever utilities — all run without API keys or external services.
 
-## Tech Stack
+---
 
-Python, FastAPI, LangGraph, LangChain, OpenAI API, ChromaDB, BM25 (rank-bm25), Reciprocal Rank Fusion, PyMuPDF, Pydantic v2, pydantic-settings, Uvicorn, pytest, Docker, Docker Compose, Google Cloud Run, Google Cloud Build, Google Artifact Registry, Google Secret Manager
+## 📂 Project structure
+
+```
+app/
+├── main.py              # FastAPI factory, session auth, login/UI routes
+├── config.py            # pydantic-settings (model, Chroma, auth)
+├── agent/               # LangGraph pipeline
+│   ├── state.py         #   TypedDict state schema
+│   ├── nodes.py         #   validate · retrieve · generate · format
+│   └── graph.py         #   StateGraph + conditional edges
+├── api/routes.py        # /query /ingest /documents /collection/stats (+ auth)
+├── services/            # ingest · retriever (hybrid + RRF) · text_extractor
+├── schemas/responses.py # Pydantic v2 models
+└── web/index.html       # single-file animated UI
+azure/chroma.yaml        # Chroma Container App spec (internal ingress + volume)
+.github/workflows/       # GitHub Actions → ACR
+cloudbuild.yaml          # Google Cloud Run CI/CD (alternative)
+tests/                   # 25 tests
+```
+
+---
+
+## 🗺️ Roadmap
+
+- **Evaluation harness** — retrieval recall@k + answer faithfulness (RAGAS / LLM-as-judge) with a results table.
+- **Durable persistence** — Azure Files NFS + VNet so the vector store survives restarts.
+- **Auto-loaded default corpus** — bundle GDPR so the knowledge base is always populated.
